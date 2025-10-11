@@ -18,6 +18,23 @@ case "$arch" in
   *) echo "Unsupported arch: $arch" >&2; exit 1 ;;
 esac
 
+# Map arch names for tools with non-standard asset naming
+# - Trivy uses Linux-64bit / Linux-ARM64
+# - Gitleaks uses linux_x64 / linux_arm64
+case "$ARCH" in
+  amd64)
+    TRIVY_ASSET_ARCH="64bit"
+    GITLEAKS_ASSET_ARCH="x64"
+    ;;
+  arm64)
+    TRIVY_ASSET_ARCH="ARM64"
+    GITLEAKS_ASSET_ARCH="arm64"
+    ;;
+  *)
+    echo "Unsupported mapped ARCH: $ARCH" >&2; exit 1
+    ;;
+esac
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --syft) SYFT_VERSION="$2"; shift 2 ;;
@@ -45,14 +62,16 @@ install_cosign() {
 
 install_trivy() {
   local ver=$1
-  curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${ver}/trivy_${ver}_Linux-${ARCH}.tar.gz" -o /tmp/trivy.tgz
+  # Trivy release assets are named like: trivy_<ver>_Linux-64bit.tar.gz or Linux-ARM64
+  curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${ver}/trivy_${ver}_Linux-${TRIVY_ASSET_ARCH}.tar.gz" -o /tmp/trivy.tgz
   tar -C /usr/local/bin -xzf /tmp/trivy.tgz trivy
   rm /tmp/trivy.tgz
 }
 
 install_gitleaks() {
   local ver=$1
-  curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_${ARCH}.tar.gz" -o /tmp/gitleaks.tgz
+  # Gitleaks uses linux_x64 or linux_arm64 asset naming
+  curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_${GITLEAKS_ASSET_ARCH}.tar.gz" -o /tmp/gitleaks.tgz
   tar -C /usr/local/bin -xzf /tmp/gitleaks.tgz gitleaks
   rm /tmp/gitleaks.tgz
 }
