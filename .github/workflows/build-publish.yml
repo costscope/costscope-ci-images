@@ -1,0 +1,130 @@
+name: build-publish
+
+on:
+    workflow_dispatch:
+    push:
+        branches:
+            - main
+        tags:
+            - "v*"
+        paths:
+            - base/**
+            - Makefile
+            - .github/workflows/build-publish.yml
+
+permissions:
+    contents: read
+    packages: write
+    id-token: write
+
+env:
+    REG: ghcr.io/${{ github.repository_owner }}
+    PLATFORMS: linux/amd64,linux/arm64
+    IS_ACT: "false"
+
+concurrency:
+    group: costscope-ci-images-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    build-base:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+            - if: env.IS_ACT != 'true'
+              uses: docker/setup-qemu-action@v3
+            - uses: docker/setup-buildx-action@v3
+            - name: Detect act
+              run: |
+                  if [ "${ACT:-}" = "true" ] || [ "${IS_ACT:-}" = "true" ]; then
+                    echo "IS_ACT=true" >> "$GITHUB_ENV"
+                  fi
+            - name: Adjust platforms for act
+              if: env.IS_ACT == 'true'
+              run: |
+                  echo "PLATFORMS=linux/amd64" >> "$GITHUB_ENV"
+            - name: Compute tags
+              id: meta
+              env:
+                  IMAGE: ci-base
+              run: |
+                  set -euo pipefail
+                  TAGS="${REG}/${IMAGE}:latest"
+                  DATE_UTC=$(date -u +%Y.%m.%d)
+                  SHORT_SHA=${GITHUB_SHA::8}
+                  TAGS+=$'\n'"${REG}/${IMAGE}:${DATE_UTC}-${SHORT_SHA}"
+                  if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]] && [[ "${GITHUB_REF_NAME:-}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+                    MAJOR="${BASH_REMATCH[1]}"; MINOR="${BASH_REMATCH[2]}"; PATCH="${BASH_REMATCH[3]}"
+                    TAGS+=$'\n'"${REG}/${IMAGE}:v${MAJOR}.${MINOR}.${PATCH}"
+                    TAGS+=$'\n'"${REG}/${IMAGE}:v${MAJOR}.${MINOR}"
+                    TAGS+=$'\n'"${REG}/${IMAGE}:v${MAJOR}"
+                  fi
+                  {
+                    echo "tags<<EOF"
+                    echo "$TAGS"
+                    echo "EOF"
+                  } >> "$GITHUB_OUTPUT"
+            - name: Login GHCR
+              if: ${{ env.IS_ACT != 'true' }}
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+            - name: Build & push base (CI)
+              if: env.IS_ACT != 'true'
+              id: base
+              uses: docker/build-push-action@v6
+              with:
+                  context: ./base
+                  push: true
+                  tags: ${{ steps.meta.outputs.tags }}
+                  platforms: ${{ env.PLATFORMS }}
+                  provenance: true
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+                  labels: |
+                      org.opencontainers.image.source=https://github.com/${{ github.repository }}
+                      org.opencontainers.image.revision=${{ github.sha }}
+            - name: Install syft & grype (pinned)
+              if: ${{ env.IS_ACT != 'true' }}
+              run: |
+                  set -euo pipefail
+                  SYFT_VER="v1.18.0"
+                  GRYPE_VER="v0.69.1"
+                  ARCH=$(uname -m)
+                  case "$ARCH" in x86_64) ARCH=amd64;; aarch64|arm64) ARCH=arm64;; *) echo "Unsupported arch: $(uname -m)"; exit 1;; esac
+                  curl -fsSL "https://github.com/anchore/syft/releases/download/${SYFT_VER}/syft_${SYFT_VER#v}_linux_${ARCH}.tar.gz" -o /tmp/syft.tgz
+                  tar -C /usr/local/bin -xzf /tmp/syft.tgz syft && rm /tmp/syft.tgz
+                  curl -fsSL "https://github.com/anchore/grype/releases/download/v${GRYPE_VER#v}/grype_${GRYPE_VER#v}_linux_${ARCH}.tar.gz" -o /tmp/grype.tgz
+                  tar -C /usr/local/bin -xzf /tmp/grype.tgz grype && rm /tmp/grype.tgz
+                  syft version && grype version
+            - name: Generate SBOM (base)
+              if: ${{ env.IS_ACT != 'true' }}
+              run: |
+                  set -euo pipefail
+                  IMAGE_TAG="${{ env.REG }}/ci-base:latest"
+                  syft "$IMAGE_TAG" -o spdx-json > sbom-ci-base.spdx.json
+            - name: Generate SBOM (base, OS-only)
+              if: ${{ env.IS_ACT != 'true' }}
+              run: |
+                  set -euo pipefail
+                  IMAGE_TAG="${{ env.REG }}/ci-base:latest"
+                  syft "$IMAGE_TAG" -o syft-json > sbom-ci-base-os.syft.json
+                  jq '.artifacts |= map(select(.type=="apk" or .type=="deb" or .type=="rpm"))' sbom-ci-base-os.syft.json > sbom-ci-base-os.syft.os-only.json
+            - name: Vulnerability scan (base, OS-only)
+              if: ${{ env.IS_ACT != 'true' }}
+              env:
+                  GRYPE_CHECK_FOR_APP_UPDATE: "false"
+              run: |
+                  set -euo pipefail
+                  grype sbom:sbom-ci-base-os.syft.os-only.json --fail-on critical --only-fixed --add-cpes-if-none
+            - name: Upload SBOM artifact (base)
+              if: ${{ always() && env.IS_ACT != 'true' }}
+              uses: actions/upload-artifact@v4
+              with:
+                  name: sbom-ci-base
+                  path: sbom-ci-base.spdx.json
+            - name: Summarize digest (base)
+              if: env.IS_ACT != 'true'
+              run: echo "ci-base@${{ steps.base.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"

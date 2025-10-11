@@ -1,0 +1,58 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editors/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.orig
+
+# Environment files (keep examples)
+.env
+.env.*
+!.env.example
+!.env.example.*
+
+# Docker related
+.docker/
+# common local override compose files
+docker-compose.override.yml
+docker-compose.local.yml
+
+# Build artifacts
+build/
+dist/
+out/
+.cache/
+.tmp/
+tmp/
+.temp/
+*.tmp
+
+# Logs & reports
+logs/
+*.log
+*.pid
+coverage/
+
+# SBOM / scan outputs
+*.sbom.json
+sbom-*.json
+*.spdx.json
+*.cdx.json
+*.sarif
+*.sarif.json
+*.trivy.json
+*.grype.json
+
+# Python virtual envs (if used by helper scripts)
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Helper scripts (temporary)
+tmp-*.sh
