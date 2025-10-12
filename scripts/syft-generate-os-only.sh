@@ -11,11 +11,11 @@ IMAGE_REF=${1:?image ref required}
 OUT=${2:?output path required}
 
 # Create a temp config enabling only OS catalogers. Syft (via viper) requires
-# a recognizable file extension for the config; ensure we write a .yaml file.
-TMP=$(mktemp -t syftcfg)
-CFG="${TMP}.yaml"
-mv "$TMP" "$CFG"
-trap 'rm -f "$CFG"' EXIT
+# a recognizable file extension for the config; use a temp directory for
+# portability (GNU/BSD mktemp differences) and write a .yaml file inside it.
+TMPDIR="$(mktemp -d)"
+CFG="${TMPDIR}/syft-config.yaml"
+trap 'rm -rf "$TMPDIR"' EXIT
 
 cat > "$CFG" <<'YAML'
 package:
