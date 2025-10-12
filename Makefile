@@ -22,26 +22,26 @@ help:
 .PHONY: build
 build:
 	docker buildx build --platform $(PLATFORM) -t $(BASE_IMAGE_NAME):$(TAG) -f base/Dockerfile base --load \
-		--build-arg BASE_IMAGE=$(BASE_IMAGE) \
-		--build-arg GO_VERSION=$(GO_VERSION) \
-		--build-arg SYFT_VERSION=$(SYFT_VERSION) \
-		--build-arg COSIGN_VERSION=$(COSIGN_VERSION) \
-		--build-arg TRIVY_VERSION=$(TRIVY_VERSION) \
-		--build-arg GITLEAKS_VERSION=$(GITLEAKS_VERSION) \
-		--build-arg GOSEC_VERSION=$(GOSEC_VERSION) \
-		--build-arg GOVULNCHECK_VERSION=$(GOVULNCHECK_VERSION)
+		$(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) \
+		$(if $(GO_VERSION),--build-arg GO_VERSION=$(GO_VERSION)) \
+		$(if $(SYFT_VERSION),--build-arg SYFT_VERSION=$(SYFT_VERSION)) \
+		$(if $(COSIGN_VERSION),--build-arg COSIGN_VERSION=$(COSIGN_VERSION)) \
+		$(if $(TRIVY_VERSION),--build-arg TRIVY_VERSION=$(TRIVY_VERSION)) \
+		$(if $(GITLEAKS_VERSION),--build-arg GITLEAKS_VERSION=$(GITLEAKS_VERSION)) \
+		$(if $(GOSEC_VERSION),--build-arg GOSEC_VERSION=$(GOSEC_VERSION)) \
+		$(if $(GOVULNCHECK_VERSION),--build-arg GOVULNCHECK_VERSION=$(GOVULNCHECK_VERSION))
 
 .PHONY: push
 push:
 	docker buildx build --platform $(PLATFORM) -t $(BASE_IMAGE_NAME):$(TAG) -f base/Dockerfile base --push \
-		--build-arg BASE_IMAGE=$(BASE_IMAGE) \
-		--build-arg GO_VERSION=$(GO_VERSION) \
-		--build-arg SYFT_VERSION=$(SYFT_VERSION) \
-		--build-arg COSIGN_VERSION=$(COSIGN_VERSION) \
-		--build-arg TRIVY_VERSION=$(TRIVY_VERSION) \
-		--build-arg GITLEAKS_VERSION=$(GITLEAKS_VERSION) \
-		--build-arg GOSEC_VERSION=$(GOSEC_VERSION) \
-		--build-arg GOVULNCHECK_VERSION=$(GOVULNCHECK_VERSION)
+		$(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) \
+		$(if $(GO_VERSION),--build-arg GO_VERSION=$(GO_VERSION)) \
+		$(if $(SYFT_VERSION),--build-arg SYFT_VERSION=$(SYFT_VERSION)) \
+		$(if $(COSIGN_VERSION),--build-arg COSIGN_VERSION=$(COSIGN_VERSION)) \
+		$(if $(TRIVY_VERSION),--build-arg TRIVY_VERSION=$(TRIVY_VERSION)) \
+		$(if $(GITLEAKS_VERSION),--build-arg GITLEAKS_VERSION=$(GITLEAKS_VERSION)) \
+		$(if $(GOSEC_VERSION),--build-arg GOSEC_VERSION=$(GOSEC_VERSION)) \
+		$(if $(GOVULNCHECK_VERSION),--build-arg GOVULNCHECK_VERSION=$(GOVULNCHECK_VERSION))
 	# also update moving tag latest
 	docker buildx build --platform $(PLATFORM) -t $(BASE_IMAGE_NAME):latest -f base/Dockerfile base --push
 

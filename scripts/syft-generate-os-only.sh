@@ -13,7 +13,7 @@ OUT=${2:?output path required}
 # Create a temp config enabling only OS catalogers. Syft (via viper) requires
 # a recognizable file extension for the config; use a temp directory for
 # portability (GNU/BSD mktemp differences) and write a .yaml file inside it.
-TMPDIR="$(mktemp -d)"
+TMPDIR="$(mktemp -d 2>/dev/null || mktemp -d -t syftcfg.XXXXXX)"
 CFG="${TMPDIR}/syft-config.yaml"
 trap 'rm -rf "$TMPDIR"' EXIT
 

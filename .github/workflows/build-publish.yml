@@ -211,6 +211,9 @@ jobs:
             sbom-ci-base.spdx.json
             sbom-ci-base-os.syft.json
             grype-ci-base.json
+      - name: Summarize digest (base)
+        if: env.IS_ACT != 'true'
+        run: echo "ci-base@${{ steps.base.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
 
   lint-sh:
     runs-on: ubuntu-latest
@@ -220,6 +223,3 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: Run shellcheck
         run: shellcheck -x scripts/*.sh base/scripts/*.sh
-      - name: Summarize digest (base)
-        if: env.IS_ACT != 'true'
-        run: echo "ci-base@${{ steps.base.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
