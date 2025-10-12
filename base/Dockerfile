@@ -2,7 +2,7 @@
 # Base CI image for CostScope security/QA jobs
 # Includes pinned versions of tools to mirror .github/workflows/security.yml
 
-ARG BASE_IMAGE=ubuntu:22.04
+ARG BASE_IMAGE=ubuntu:24.04
 FROM ${BASE_IMAGE} AS base
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -15,10 +15,15 @@ ARG GITLEAKS_VERSION=8.18.4
 ARG GOSEC_VERSION=2.21.4
 ARG GOVULNCHECK_VERSION=1.1.3
 
-# Install base deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates gnupg lsb-release git make jq tar gzip xz-utils \
-    && rm -rf /var/lib/apt/lists/*
+# Install base deps and apply security updates
+RUN set -eux; \
+        apt-get update; \
+        apt-get -y upgrade; \
+        apt-get install -y --no-install-recommends \
+            curl ca-certificates gnupg lsb-release git make jq tar gzip xz-utils; \
+        apt-get -y autoremove; \
+        apt-get clean; \
+        rm -rf /var/lib/apt/lists/*
 
 # Install Go (official tarball)
 RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-$(arch | sed 's/aarch64/arm64/;s/x86_64/amd64/').tar.gz -o /tmp/go.tgz \

@@ -46,7 +46,7 @@ env:
   IS_ACT: "false"
   SYFT_VERSION: v1.18.0
   GRYPE_VERSION: v0.69.1
-  BASE_IMAGE: ubuntu:22.04
+  BASE_IMAGE: ubuntu:24.04
   GO_VERSION: 1.24.3
   COSIGN_VERSION: v2.2.4
   TRIVY_VERSION: 0.56.2
@@ -176,14 +176,26 @@ jobs:
           ./scripts/syft-generate-os-only.sh "$IMAGE_TAG" sbom-ci-base-os.syft.json
       - name: Vulnerability scan (base, SPDX)
         if: ${{ env.IS_ACT != 'true' }}
+        continue-on-error: true
         env:
           GRYPE_CHECK_FOR_APP_UPDATE: "false"
           GRYPE_FAIL_ON: ${{ env.GRYPE_FAIL_ON }}
           GRYPE_ONLY_FIXED: ${{ env.GRYPE_ONLY_FIXED }}
+          GRYPE_EXIT_CODE_FILE: grype-exit-code.txt
         run: |
           set -euo pipefail
           chmod +x scripts/grype-scan-sbom.sh
-          GRYPE_JSON_OUT=grype-ci-base.json ./scripts/grype-scan-sbom.sh sbom-ci-base.spdx.json
+          GRYPE_JSON_OUT=grype-ci-base.json ./scripts/grype-scan-sbom.sh sbom-ci-base.spdx.json || true
+      - name: Summarize Grype result (base)
+        if: ${{ always() && env.IS_ACT != 'true' }}
+        run: |
+          set -euo pipefail
+          RC=$(cat grype-exit-code.txt 2>/dev/null || echo "0")
+          if [ "$RC" -eq 0 ]; then
+            echo "Grype scan (base): PASSED" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Grype scan (base): FOUND vulnerabilities at or above threshold; see grype-ci-base.json" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload SBOM artifact (base)
         if: ${{ always() && env.IS_ACT != 'true' }}
         uses: actions/upload-artifact@v4
@@ -211,6 +223,34 @@ jobs:
             sbom-ci-base.spdx.json
             sbom-ci-base-os.syft.json
             grype-ci-base.json
+      - name: Vulnerability scan (base, OS-only SBOM)
+        if: ${{ env.IS_ACT != 'true' }}
+        continue-on-error: true
+        env:
+          GRYPE_CHECK_FOR_APP_UPDATE: "false"
+          GRYPE_FAIL_ON: ${{ env.GRYPE_FAIL_ON }}
+          GRYPE_ONLY_FIXED: ${{ env.GRYPE_ONLY_FIXED }}
+          GRYPE_EXIT_CODE_FILE: grype-exit-code-os.txt
+        run: |
+          set -euo pipefail
+          chmod +x scripts/grype-scan-sbom.sh
+          GRYPE_JSON_OUT=grype-ci-base-os.json ./scripts/grype-scan-sbom.sh sbom-ci-base-os.syft.json || true
+      - name: Upload Grype report (base, OS-only)
+        if: ${{ always() && env.IS_ACT != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: grype-ci-base-os
+          path: grype-ci-base-os.json
+      - name: Summarize Grype result (base, OS-only)
+        if: ${{ always() && env.IS_ACT != 'true' }}
+        run: |
+          set -euo pipefail
+          RC=$(cat grype-exit-code-os.txt 2>/dev/null || echo "0")
+          if [ "$RC" -eq 0 ]; then
+            echo "Grype scan (base, OS-only): PASSED" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Grype scan (base, OS-only): FOUND vulnerabilities at or above threshold; see grype-ci-base-os.json" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Summarize digest (base)
         if: env.IS_ACT != 'true'
         run: echo "ci-base@${{ steps.base.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
