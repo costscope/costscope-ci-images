@@ -2,6 +2,29 @@ name: build-publish
 
 on:
   workflow_dispatch:
+    inputs:
+      syft_version:
+        description: "Syft version to install (e.g., v1.18.0)"
+        required: false
+        default: "v1.18.0"
+      grype_version:
+        description: "Grype version to install (e.g., v0.69.1)"
+        required: false
+        default: "v0.69.1"
+      severity_threshold:
+        description: "Grype fail-on severity (critical|high|medium|low|negligible|unknown)"
+        required: false
+        default: "critical"
+      only_fixed:
+        description: "Grype: report only fixed vulns (true|false)"
+        required: false
+        default: "true"
+      platforms:
+        description: "Docker build platforms (comma-separated)"
+        required: false
+        default: "linux/amd64,linux/arm64"
+  schedule:
+    - cron: "0 3 * * 1"
   push:
     branches:
       - main
@@ -21,6 +44,8 @@ env:
   REG: ghcr.io/${{ github.repository_owner }}
   PLATFORMS: linux/amd64,linux/arm64
   IS_ACT: "false"
+  SYFT_VERSION: v1.18.0
+  GRYPE_VERSION: v0.69.1
 
 concurrency:
   group: costscope-ci-images-${{ github.ref }}
@@ -43,6 +68,15 @@ jobs:
         if: env.IS_ACT == 'true'
         run: |
           echo "PLATFORMS=linux/amd64" >> "$GITHUB_ENV"
+      - name: Override tool versions (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch' && env.IS_ACT != 'true'
+        run: |
+          # Override defaults from dispatch inputs (values always present due to defaults)
+          echo "SYFT_VERSION=${{ inputs.syft_version }}" >> "$GITHUB_ENV"
+          echo "GRYPE_VERSION=${{ inputs.grype_version }}" >> "$GITHUB_ENV"
+          echo "PLATFORMS=${{ inputs.platforms }}" >> "$GITHUB_ENV"
+          echo "GRYPE_FAIL_ON=${{ inputs.severity_threshold }}" >> "$GITHUB_ENV"
+          echo "GRYPE_ONLY_FIXED=${{ inputs.only_fixed }}" >> "$GITHUB_ENV"
       - name: Compute tags
         id: meta
         env:
@@ -90,51 +124,52 @@ jobs:
         if: ${{ env.IS_ACT != 'true' }}
         run: |
           set -euo pipefail
-          SYFT_VER="v1.18.0"
-          GRYPE_VER="v0.69.1"
-          ARCH=$(uname -m)
-          case "$ARCH" in x86_64) ARCH=amd64;; aarch64|arm64) ARCH=arm64;; *) echo "Unsupported arch: $(uname -m)"; exit 1;; esac
-          curl -fsSL "https://github.com/anchore/syft/releases/download/${SYFT_VER}/syft_${SYFT_VER#v}_linux_${ARCH}.tar.gz" -o /tmp/syft.tgz
-          tar -C /usr/local/bin -xzf /tmp/syft.tgz syft && rm /tmp/syft.tgz
-          curl -fsSL "https://github.com/anchore/grype/releases/download/v${GRYPE_VER#v}/grype_${GRYPE_VER#v}_linux_${ARCH}.tar.gz" -o /tmp/grype.tgz
-          tar -C /usr/local/bin -xzf /tmp/grype.tgz grype && rm /tmp/grype.tgz
-          syft version && grype version
+          chmod +x scripts/install-syft-grype.sh
+          ./scripts/install-syft-grype.sh "${SYFT_VERSION}" "${GRYPE_VERSION}"
+      - name: Summarize tool versions
+        if: ${{ env.IS_ACT != 'true' }}
+        run: |
+          {
+            echo "### Tool versions"
+            syft version | sed 's/^/- /'
+            grype version | sed 's/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Generate SBOM (base)
         if: ${{ env.IS_ACT != 'true' }}
         run: |
           set -euo pipefail
           IMAGE_TAG="${{ env.REG }}/ci-base:latest"
-          syft "$IMAGE_TAG" -o spdx-json > sbom-ci-base.spdx.json
+          chmod +x scripts/syft-generate-spdx.sh
+          ./scripts/syft-generate-spdx.sh "$IMAGE_TAG" sbom-ci-base.spdx.json
       - name: Generate SBOM (base, OS-only)
         if: ${{ env.IS_ACT != 'true' }}
         run: |
           set -euo pipefail
           IMAGE_TAG="${{ env.REG }}/ci-base:latest"
-          # Generate OS-only SBOM by enabling only OS package catalogers in Syft
-          cat > syft-os-only.yaml <<'YAML'
-          application:
-            defaultOutput: "syft-json"
-          package:
-            catalogers:
-              enabled:
-                - "apkdb-cataloger"
-                - "dpkgdb-cataloger"
-                - "rpmdb-cataloger"
-          YAML
-          syft "$IMAGE_TAG" -c syft-os-only.yaml -o syft-json > sbom-ci-base-os.syft.json
+          chmod +x scripts/syft-generate-os-only.sh
+          ./scripts/syft-generate-os-only.sh "$IMAGE_TAG" sbom-ci-base-os.syft.json
       - name: Vulnerability scan (base, SPDX)
         if: ${{ env.IS_ACT != 'true' }}
         env:
           GRYPE_CHECK_FOR_APP_UPDATE: "false"
+          GRYPE_FAIL_ON: ${{ env.GRYPE_FAIL_ON }}
+          GRYPE_ONLY_FIXED: ${{ env.GRYPE_ONLY_FIXED }}
         run: |
           set -euo pipefail
-          grype sbom:sbom-ci-base.spdx.json --fail-on critical --only-fixed --add-cpes-if-none
+          chmod +x scripts/grype-scan-sbom.sh
+          ./scripts/grype-scan-sbom.sh sbom-ci-base.spdx.json
       - name: Upload SBOM artifact (base)
         if: ${{ always() && env.IS_ACT != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: sbom-ci-base
           path: sbom-ci-base.spdx.json
+      - name: Upload SBOM artifact (base, OS-only)
+        if: ${{ always() && env.IS_ACT != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-ci-base-os
+          path: sbom-ci-base-os.syft.json
       - name: Summarize digest (base)
         if: env.IS_ACT != 'true'
         run: echo "ci-base@${{ steps.base.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
