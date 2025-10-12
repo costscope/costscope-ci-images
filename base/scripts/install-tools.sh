@@ -94,9 +94,9 @@ install_govulncheck() {
 [[ -n "$GOVULNCHECK_VERSION" ]] && install_govulncheck "$GOVULNCHECK_VERSION"
 
 echo "Installed tools:" >&2
-command -v syft >/dev/null && syft version || true
-command -v cosign >/dev/null && cosign version || true
-command -v trivy >/dev/null && trivy --version || true
-command -v gitleaks >/dev/null && gitleaks version || true
-command -v gosec >/dev/null && gosec --version || true
-command -v govulncheck >/dev/null && govulncheck -version || true
+if command -v syft >/dev/null 2>&1; then syft version || true; fi
+if command -v cosign >/dev/null 2>&1; then cosign version || true; fi
+if command -v trivy >/dev/null 2>&1; then trivy --version || true; fi
+if command -v gitleaks >/dev/null 2>&1; then gitleaks version || true; fi
+if command -v gosec >/dev/null 2>&1; then gosec --version || true; fi
+if command -v govulncheck >/dev/null 2>&1; then govulncheck -version || true; fi

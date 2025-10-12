@@ -47,6 +47,7 @@ sbom-*.json
 *.sarif.json
 *.trivy.json
 *.grype.json
+sbom-bundle.tgz
 
 # Python virtual envs (if used by helper scripts)
 .venv/
