@@ -12,6 +12,7 @@ GOSEC_VERSION=""
 GOVULNCHECK_VERSION=""
 YQ_VERSION=""
 GITCLIFF_VERSION=""
+GOLANGCI_LINT_VERSION=""
 
 arch=$(uname -m)
 case "$arch" in
@@ -47,6 +48,7 @@ while [[ $# -gt 0 ]]; do
     --govulncheck) GOVULNCHECK_VERSION="$2"; shift 2 ;;
     --yq) YQ_VERSION="$2"; shift 2 ;;
     --gitcliff) GITCLIFF_VERSION="$2"; shift 2 ;;
+    --golangci-lint) GOLANGCI_LINT_VERSION="$2"; shift 2 ;;
     *) echo "Unknown arg: $1" >&2; exit 1 ;;
   esac
 done
@@ -82,7 +84,32 @@ install_gitleaks() {
 
 install_gosec() {
   local ver=$1
-  GOBIN=/usr/local/bin go install "github.com/securego/gosec/v2/cmd/gosec@v${ver}"
+  # Use prebuilt binaries from GitHub releases to avoid heavy go install module downloads
+  # Release assets follow: gosec_<ver>_linux_amd64.tar.gz or linux_arm64
+  local asset_arch
+  case "$ARCH" in
+    amd64) asset_arch=amd64 ;;
+    arm64) asset_arch=arm64 ;;
+    *) echo "Unsupported ARCH for gosec: $ARCH" >&2; exit 1 ;;
+  esac
+  local url="https://github.com/securego/gosec/releases/download/v${ver}/gosec_${ver}_linux_${asset_arch}.tar.gz"
+  local tmpd="/tmp/gosec.$$"
+  mkdir -p "$tmpd"
+  if ! curl -fsSL -o "$tmpd/gosec.tgz" "$url"; then
+    echo "Failed to download gosec ${ver} from ${url}" >&2
+    rm -rf "$tmpd"
+    exit 1
+  fi
+  tar -C "$tmpd" -xzf "$tmpd/gosec.tgz"
+  local bin
+  bin=$(find "$tmpd" -type f -name gosec -perm -u+x | head -n1 || true)
+  if [[ -z "$bin" ]]; then
+    echo "gosec binary not found in archive" >&2
+    rm -rf "$tmpd"
+    exit 1
+  fi
+  install -m 0755 "$bin" /usr/local/bin/gosec
+  rm -rf "$tmpd"
 }
 
 install_govulncheck() {
@@ -160,6 +187,36 @@ install_gitcliff() {
   rm -rf "$tmpd"
 }
 
+install_golangci_lint() {
+  local ver=$1
+  # Accept versions like v1.61.0; strip leading v for asset naming used by upstream
+  local ver_no_v=${ver#v}
+  local asset_arch
+  case "$ARCH" in
+    amd64) asset_arch=amd64 ;;
+    arm64) asset_arch=arm64 ;;
+    *) echo "Unsupported ARCH for golangci-lint: $ARCH" >&2; exit 1 ;;
+  esac
+  local url="https://github.com/golangci/golangci-lint/releases/download/${ver}/golangci-lint-${ver_no_v}-linux-${asset_arch}.tar.gz"
+  local tmpd="/tmp/golangci.$$"
+  mkdir -p "$tmpd"
+  if ! curl -fsSL -o "$tmpd/golangci.tgz" "$url"; then
+    echo "Failed to download golangci-lint ${ver} from ${url}" >&2
+    rm -rf "$tmpd"
+    exit 1
+  fi
+  tar -C "$tmpd" -xzf "$tmpd/golangci.tgz"
+  local bin
+  bin=$(find "$tmpd" -type f -name golangci-lint -perm -u+x | head -n1 || true)
+  if [[ -z "$bin" ]]; then
+    echo "golangci-lint binary not found in archive" >&2
+    rm -rf "$tmpd"
+    exit 1
+  fi
+  install -m 0755 "$bin" /usr/local/bin/golangci-lint
+  rm -rf "$tmpd"
+}
+
 [[ -n "$SYFT_VERSION" ]] && install_syft "$SYFT_VERSION"
 [[ -n "$COSIGN_VERSION" ]] && install_cosign "$COSIGN_VERSION"
 [[ -n "$TRIVY_VERSION" ]] && install_trivy "$TRIVY_VERSION"
@@ -168,6 +225,7 @@ install_gitcliff() {
 [[ -n "$GOVULNCHECK_VERSION" ]] && install_govulncheck "$GOVULNCHECK_VERSION"
 [[ -n "$YQ_VERSION" ]] && install_yq "$YQ_VERSION"
 [[ -n "$GITCLIFF_VERSION" ]] && install_gitcliff "$GITCLIFF_VERSION"
+[[ -n "$GOLANGCI_LINT_VERSION" ]] && install_golangci_lint "$GOLANGCI_LINT_VERSION"
 
 echo "Installed tools:" >&2
 if command -v syft >/dev/null 2>&1; then syft version || true; fi
@@ -178,3 +236,4 @@ if command -v gosec >/dev/null 2>&1; then gosec --version || true; fi
 if command -v govulncheck >/dev/null 2>&1; then govulncheck -version || true; fi
 if command -v yq >/dev/null 2>&1; then yq --version || true; fi
 if command -v git-cliff >/dev/null 2>&1; then git-cliff --version || true; fi
+if command -v golangci-lint >/dev/null 2>&1; then golangci-lint version || true; fi

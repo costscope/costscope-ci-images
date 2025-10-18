@@ -41,13 +41,17 @@ RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-$(arch | sed 's/aarch64/a
 # Ensure both Go and local binaries are available in PATH; force local toolchain to avoid auto-downloads
 ENV PATH="/usr/local/bin:/usr/local/go/bin:${PATH}"
 ENV GOTOOLCHAIN=local
+# Speed up and stabilize Go module downloads during image build
+ENV GOPROXY="https://proxy.golang.org,direct"
 
 # Add installer script
 COPY scripts/install-tools.sh /usr/local/bin/install-tools
 RUN chmod +x /usr/local/bin/install-tools
 
 # Install pinned tools
-RUN install-tools \
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    install-tools \
     --syft "${SYFT_VERSION}" \
     --cosign "${COSIGN_VERSION}" \
     --trivy "${TRIVY_VERSION}" \
@@ -55,14 +59,13 @@ RUN install-tools \
     --gosec "${GOSEC_VERSION}" \
     --govulncheck "${GOVULNCHECK_VERSION}" \
     --yq "${YQ_VERSION}" \
+    --golangci-lint "${GOLANGCI_LINT_VERSION}" \
     --gitcliff "${GITCLIFF_VERSION}"
 
-# Preinstall golangci-lint at a pinned version for speed/parity with workflow
-RUN GO111MODULE=on GOBIN=/usr/local/bin \
-    /usr/local/go/bin/go install github.com/golangci/golangci-lint/cmd/golangci-lint@${GOLANGCI_LINT_VERSION} || true
-
 # Optionally install oasdiff at a pinned commit ref for contract checks
-RUN if [ -n "${OASDIFF_REF}" ]; then \
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    if [ -n "${OASDIFF_REF}" ]; then \
             GOBIN=/usr/local/bin go install "github.com/oasdiff/oasdiff@${OASDIFF_REF}"; \
         fi
 
