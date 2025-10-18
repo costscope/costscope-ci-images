@@ -10,6 +10,8 @@ TRIVY_VERSION=""
 GITLEAKS_VERSION=""
 GOSEC_VERSION=""
 GOVULNCHECK_VERSION=""
+YQ_VERSION=""
+GITCLIFF_VERSION=""
 
 arch=$(uname -m)
 case "$arch" in
@@ -43,6 +45,8 @@ while [[ $# -gt 0 ]]; do
     --gitleaks) GITLEAKS_VERSION="$2"; shift 2 ;;
     --gosec) GOSEC_VERSION="$2"; shift 2 ;;
     --govulncheck) GOVULNCHECK_VERSION="$2"; shift 2 ;;
+    --yq) YQ_VERSION="$2"; shift 2 ;;
+    --gitcliff) GITCLIFF_VERSION="$2"; shift 2 ;;
     *) echo "Unknown arg: $1" >&2; exit 1 ;;
   esac
 done
@@ -86,12 +90,73 @@ install_govulncheck() {
   GOBIN=/usr/local/bin go install "golang.org/x/vuln/cmd/govulncheck@v${ver}"
 }
 
+install_yq() {
+  local ver=$1
+  # yq provides plain binaries named yq_linux_amd64 or yq_linux_arm64
+  local asset_arch
+  case "$ARCH" in
+    amd64) asset_arch=amd64 ;;
+    arm64) asset_arch=arm64 ;;
+    *) echo "Unsupported ARCH for yq: $ARCH" >&2; exit 1 ;;
+  esac
+  curl -fsSL "https://github.com/mikefarah/yq/releases/download/${ver}/yq_linux_${asset_arch}" -o /usr/local/bin/yq
+  chmod +x /usr/local/bin/yq
+}
+
+install_gitcliff() {
+  local ver=$1
+  # git-cliff assets vary by release; try a few common patterns in order.
+  # Examples:
+  #  - git-cliff-<ver>-x86_64-unknown-linux-gnu.tar.gz
+  #  - git-cliff-<ver>-aarch64-unknown-linux-gnu.tar.gz
+  #  - git-cliff-<ver>-linux-x86_64.tar.gz (older pattern)
+  local arch_pattern
+  case "$ARCH" in
+    amd64) arch_pattern=("x86_64-unknown-linux-gnu" "linux-x86_64" "x86_64-unknown-linux-musl") ;;
+    arm64) arch_pattern=("aarch64-unknown-linux-gnu" "linux-arm64" "aarch64-unknown-linux-musl") ;;
+    *) echo "Unsupported ARCH for git-cliff: $ARCH" >&2; exit 1 ;;
+  esac
+
+  local found="" url="" tmpd="/tmp/gitcliff.$$"
+  mkdir -p "$tmpd"
+  for pat in "${arch_pattern[@]}"; do
+    url="https://github.com/orhun/git-cliff/releases/download/${ver}/git-cliff-${ver#v}-${pat}.tar.gz"
+    if curl -fsSL -o "$tmpd/git-cliff.tgz" "$url"; then
+      found="$url"
+      break
+    fi
+  done
+  if [[ -z "$found" ]]; then
+    echo "Failed to download git-cliff ${ver} for ARCH=${ARCH}; tried patterns: ${arch_pattern[*]}" >&2
+    rm -rf "$tmpd"
+    exit 1
+  fi
+  tar -C "$tmpd" -xzf "$tmpd/git-cliff.tgz"
+  # Find the binary in extracted content (path may include a directory)
+  local bin
+  bin=$(find "$tmpd" -type f -name git-cliff -perm -u+x | head -n1 || true)
+  if [[ -z "$bin" ]]; then
+    # Some archives may include just the binary named git-cliff in root
+    if [[ -f "$tmpd/git-cliff" ]]; then
+      bin="$tmpd/git-cliff"
+    else
+      echo "git-cliff binary not found in archive from $found" >&2
+      rm -rf "$tmpd"
+      exit 1
+    fi
+  fi
+  install -m 0755 "$bin" /usr/local/bin/git-cliff
+  rm -rf "$tmpd"
+}
+
 [[ -n "$SYFT_VERSION" ]] && install_syft "$SYFT_VERSION"
 [[ -n "$COSIGN_VERSION" ]] && install_cosign "$COSIGN_VERSION"
 [[ -n "$TRIVY_VERSION" ]] && install_trivy "$TRIVY_VERSION"
 [[ -n "$GITLEAKS_VERSION" ]] && install_gitleaks "$GITLEAKS_VERSION"
 [[ -n "$GOSEC_VERSION" ]] && install_gosec "$GOSEC_VERSION"
 [[ -n "$GOVULNCHECK_VERSION" ]] && install_govulncheck "$GOVULNCHECK_VERSION"
+[[ -n "$YQ_VERSION" ]] && install_yq "$YQ_VERSION"
+[[ -n "$GITCLIFF_VERSION" ]] && install_gitcliff "$GITCLIFF_VERSION"
 
 echo "Installed tools:" >&2
 if command -v syft >/dev/null 2>&1; then syft version || true; fi
@@ -100,3 +165,5 @@ if command -v trivy >/dev/null 2>&1; then trivy --version || true; fi
 if command -v gitleaks >/dev/null 2>&1; then gitleaks version || true; fi
 if command -v gosec >/dev/null 2>&1; then gosec --version || true; fi
 if command -v govulncheck >/dev/null 2>&1; then govulncheck -version || true; fi
+if command -v yq >/dev/null 2>&1; then yq --version || true; fi
+if command -v git-cliff >/dev/null 2>&1; then git-cliff --version || true; fi

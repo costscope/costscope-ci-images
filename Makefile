@@ -1,5 +1,8 @@
 IMAGE_NS ?= ghcr.io/costscope/ci
 BASE_IMAGE_NAME ?= $(IMAGE_NS)/base
+CONTRACT_IMAGE_NAME ?= $(IMAGE_NS)/contract
+HY_BASE_IMAGE_NAME ?= $(IMAGE_NS)-base
+HY_CONTRACT_IMAGE_NAME ?= $(IMAGE_NS)-contract
 DATE_TAG := $(shell date -u +%Y%m%d)
 GIT_SHA := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo dev)
 TAG ?= $(DATE_TAG)-$(GIT_SHA)
@@ -13,6 +16,8 @@ help:
 	@echo "Targets:"
 	@echo "  build        Build multi-arch image (loaded locally)"
 	@echo "  push         Build & push image (and :latest)"
+	@echo "  build-contract  Build warmed contract image (loaded locally)"
+	@echo "  push-contract   Build & push warmed contract image (and :latest)"
 	@echo "  version      Run image and print tool versions"
 	@echo "  sbom-spdx    Generate SPDX SBOM for IMAGE (env IMAGE)"
 	@echo "  sbom-os      Generate OS-only Syft SBOM for IMAGE (env IMAGE)"
@@ -30,6 +35,10 @@ build:
 		$(if $(GITLEAKS_VERSION),--build-arg GITLEAKS_VERSION=$(GITLEAKS_VERSION)) \
 		$(if $(GOSEC_VERSION),--build-arg GOSEC_VERSION=$(GOSEC_VERSION)) \
 		$(if $(GOVULNCHECK_VERSION),--build-arg GOVULNCHECK_VERSION=$(GOVULNCHECK_VERSION))
+	# Tag hyphen-style alias for compatibility with workflows (ci-base)
+	-@docker tag $(BASE_IMAGE_NAME):$(TAG) $(HY_BASE_IMAGE_NAME):$(TAG) 2>/dev/null || true
+	# Also tag a hyphen-style alias (ci-base) for local consumption and downstream FROM references
+	-@docker tag $(BASE_IMAGE_NAME):$(TAG) $(subst /,-,$(BASE_IMAGE_NAME)):$(TAG) 2>/dev/null || true
 
 .PHONY: push
 push:
@@ -44,6 +53,28 @@ push:
 		$(if $(GOVULNCHECK_VERSION),--build-arg GOVULNCHECK_VERSION=$(GOVULNCHECK_VERSION))
 	# also update moving tag latest
 	docker buildx build --platform $(PLATFORM) -t $(BASE_IMAGE_NAME):latest -f base/Dockerfile base --push
+	# Optionally mirror hyphen-style alias when publishing (best-effort)
+	-@docker buildx imagetools create -t $(HY_BASE_IMAGE_NAME):$(TAG) $(BASE_IMAGE_NAME):$(TAG) 2>/dev/null || true
+	-@docker buildx imagetools create -t $(HY_BASE_IMAGE_NAME):latest $(BASE_IMAGE_NAME):latest 2>/dev/null || true
+
+.PHONY: build-contract
+build-contract:
+	@if [ "$(TAG)" = "dev-local" ]; then \
+		DOCKER_BUILDKIT=1 docker build -t $(CONTRACT_IMAGE_NAME):$(TAG) -f contract/Dockerfile ../costscope \
+			--build-arg BASE_IMAGE=$(HY_BASE_IMAGE_NAME):$(TAG); \
+	else \
+		docker buildx build --platform $(PLATFORM) -t $(CONTRACT_IMAGE_NAME):$(TAG) -f contract/Dockerfile ../costscope --load \
+			--build-arg BASE_IMAGE=$(BASE_IMAGE_NAME):$(TAG); \
+	fi
+
+.PHONY: push-contract
+push-contract:
+	# Build from project repository root to include go.mod files; set context to ../costscope
+	docker buildx build --platform $(PLATFORM) -t $(CONTRACT_IMAGE_NAME):$(TAG) -f contract/Dockerfile ../costscope --push \
+		--build-arg BASE_IMAGE=$(BASE_IMAGE_NAME):$(TAG)
+	# also update moving tag latest
+	docker buildx build --platform $(PLATFORM) -t $(CONTRACT_IMAGE_NAME):latest -f contract/Dockerfile ../costscope --push \
+		--build-arg BASE_IMAGE=$(BASE_IMAGE_NAME):$(TAG)
 
 .PHONY: version
 version:
