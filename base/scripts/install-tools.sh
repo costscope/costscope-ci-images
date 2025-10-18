@@ -117,21 +117,32 @@ install_gitcliff() {
     *) echo "Unsupported ARCH for git-cliff: $ARCH" >&2; exit 1 ;;
   esac
 
-  local found="" url="" tmpd="/tmp/gitcliff.$$"
+  local found="" url="" tmpd="/tmp/gitcliff.$$" used_ext=""
   mkdir -p "$tmpd"
+  # Some releases publish .tar.xz instead of .tar.gz. Try both.
+  local exts=("tar.gz" "tar.xz")
   for pat in "${arch_pattern[@]}"; do
-    url="https://github.com/orhun/git-cliff/releases/download/${ver}/git-cliff-${ver#v}-${pat}.tar.gz"
-    if curl -fsSL -o "$tmpd/git-cliff.tgz" "$url"; then
-      found="$url"
-      break
-    fi
+    for ext in "${exts[@]}"; do
+      url="https://github.com/orhun/git-cliff/releases/download/${ver}/git-cliff-${ver#v}-${pat}.${ext}"
+      # Always download to the same temp filename; we record ext used for extraction
+      if curl -fsSL -o "$tmpd/git-cliff.tar" "$url"; then
+        found="$url"
+        used_ext="$ext"
+        break 2
+      fi
+    done
   done
   if [[ -z "$found" ]]; then
     echo "Failed to download git-cliff ${ver} for ARCH=${ARCH}; tried patterns: ${arch_pattern[*]}" >&2
     rm -rf "$tmpd"
     exit 1
   fi
-  tar -C "$tmpd" -xzf "$tmpd/git-cliff.tgz"
+  # Extract depending on the archive compression
+  case "$used_ext" in
+    tar.gz) tar -C "$tmpd" -xzf "$tmpd/git-cliff.tar" ;;
+    tar.xz) tar -C "$tmpd" -xJf "$tmpd/git-cliff.tar" ;;
+    *) echo "Unknown archive type for git-cliff: $used_ext from $found" >&2; rm -rf "$tmpd"; exit 1 ;;
+  esac
   # Find the binary in extracted content (path may include a directory)
   local bin
   bin=$(find "$tmpd" -type f -name git-cliff -perm -u+x | head -n1 || true)
