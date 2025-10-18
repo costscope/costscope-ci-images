@@ -115,6 +115,32 @@ jobs:
             echo "$TAGS"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+      - name: Build base (act, no cache)
+        if: env.IS_ACT == 'true'
+        env:
+          IMAGE: ci-base
+        run: |
+          set -euo pipefail
+          echo "[act] Building $REG/${IMAGE}:dev-local with --no-cache (platform linux/amd64)"
+          # ensure platform narrowed for act
+          PLAT=${PLATFORMS:-linux/amd64}
+          # act environment forces single-arch; ignore commas just in case
+          if echo "$PLAT" | grep -q ','; then PLAT=linux/amd64; fi
+          docker buildx build \
+            --platform "$PLAT" \
+            --no-cache \
+            -t "$REG/${IMAGE}:dev-local" \
+            -f base/Dockerfile base \
+            --load \
+            --build-arg BASE_IMAGE="${BASE_IMAGE}" \
+            --build-arg GO_VERSION="${GO_VERSION}" \
+            --build-arg SYFT_VERSION="${SYFT_VERSION}" \
+            --build-arg COSIGN_VERSION="${COSIGN_VERSION}" \
+            --build-arg TRIVY_VERSION="${TRIVY_VERSION}" \
+            --build-arg GITLEAKS_VERSION="${GITLEAKS_VERSION}" \
+            --build-arg GOSEC_VERSION="${GOSEC_VERSION}" \
+            --build-arg GOVULNCHECK_VERSION="${GOVULNCHECK_VERSION}"
+          echo "[act] Built and loaded $REG/${IMAGE}:dev-local"
       - name: Login GHCR
         if: ${{ env.IS_ACT != 'true' }}
         uses: docker/login-action@v3

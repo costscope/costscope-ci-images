@@ -6,7 +6,12 @@ HY_CONTRACT_IMAGE_NAME ?= $(IMAGE_NS)-contract
 DATE_TAG := $(shell date -u +%Y%m%d)
 GIT_SHA := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo dev)
 TAG ?= $(DATE_TAG)-$(GIT_SHA)
-PLATFORM ?= linux/amd64,linux/arm64
+# Detect the local docker server platform for safe --load builds (falls back to linux/amd64)
+LOCAL_PLATFORM := $(shell docker version -f '{{.Server.Os}}/{{.Server.Arch}}' 2>/dev/null || echo linux/amd64)
+# Default local build platform (safe with --load)
+PLATFORM ?= $(LOCAL_PLATFORM)
+# Multi-arch set used for push targets (manifest list)
+MULTI_PLATFORMS ?= linux/amd64,linux/arm64
 
 # Load pinned versions if present
 -include versions.env
@@ -14,8 +19,10 @@ PLATFORM ?= linux/amd64,linux/arm64
 .PHONY: help
 help:
 	@echo "Targets:"
-	@echo "  build        Build multi-arch image (loaded locally)"
-	@echo "  push         Build & push image (and :latest)"
+	@echo "  build        Build image for local platform ($(LOCAL_PLATFORM)) and load into docker"
+	@echo "               Override with PLATFORM=linux/amd64 or linux/arm64 for a specific arch"
+	@echo "               Note: --load does not support multiple platforms; use 'make push' for multi-arch"
+	@echo "  push         Build & push multi-arch image (and :latest)"
 	@echo "  build-contract  Build warmed contract image (loaded locally)"
 	@echo "  push-contract   Build & push warmed contract image (and :latest)"
 	@echo "  version      Run image and print tool versions"
@@ -26,6 +33,11 @@ help:
 
 .PHONY: build
 build:
+	@if echo "$(PLATFORM)" | grep -q ','; then \
+	  echo "Error: docker exporter does not support --load for multiple platforms: $(PLATFORM)" >&2; \
+	  echo "Hint: use 'make push' for multi-arch or set PLATFORM=linux/amd64 (or linux/arm64) for local --load builds." >&2; \
+	  exit 1; \
+	fi
 	docker buildx build --platform $(PLATFORM) -t $(BASE_IMAGE_NAME):$(TAG) -f base/Dockerfile base --load \
 		$(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) \
 		$(if $(GO_VERSION),--build-arg GO_VERSION=$(GO_VERSION)) \
@@ -35,14 +47,14 @@ build:
 		$(if $(GITLEAKS_VERSION),--build-arg GITLEAKS_VERSION=$(GITLEAKS_VERSION)) \
 		$(if $(GOSEC_VERSION),--build-arg GOSEC_VERSION=$(GOSEC_VERSION)) \
 		$(if $(GOVULNCHECK_VERSION),--build-arg GOVULNCHECK_VERSION=$(GOVULNCHECK_VERSION))
-	# Tag hyphen-style alias for compatibility with workflows (ci-base)
+	# Tag hyphen-style alias for compatibility with workflows (ci-base) only when image is local
 	-@docker tag $(BASE_IMAGE_NAME):$(TAG) $(HY_BASE_IMAGE_NAME):$(TAG) 2>/dev/null || true
 	# Also tag a hyphen-style alias (ci-base) for local consumption and downstream FROM references
 	-@docker tag $(BASE_IMAGE_NAME):$(TAG) $(subst /,-,$(BASE_IMAGE_NAME)):$(TAG) 2>/dev/null || true
 
 .PHONY: push
 push:
-	docker buildx build --platform $(PLATFORM) -t $(BASE_IMAGE_NAME):$(TAG) -f base/Dockerfile base --push \
+	docker buildx build --platform $(MULTI_PLATFORMS) -t $(BASE_IMAGE_NAME):$(TAG) -f base/Dockerfile base --push \
 		$(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) \
 		$(if $(GO_VERSION),--build-arg GO_VERSION=$(GO_VERSION)) \
 		$(if $(SYFT_VERSION),--build-arg SYFT_VERSION=$(SYFT_VERSION)) \
@@ -52,7 +64,7 @@ push:
 		$(if $(GOSEC_VERSION),--build-arg GOSEC_VERSION=$(GOSEC_VERSION)) \
 		$(if $(GOVULNCHECK_VERSION),--build-arg GOVULNCHECK_VERSION=$(GOVULNCHECK_VERSION))
 	# also update moving tag latest
-	docker buildx build --platform $(PLATFORM) -t $(BASE_IMAGE_NAME):latest -f base/Dockerfile base --push
+	docker buildx build --platform $(MULTI_PLATFORMS) -t $(BASE_IMAGE_NAME):latest -f base/Dockerfile base --push
 	# Optionally mirror hyphen-style alias when publishing (best-effort)
 	-@docker buildx imagetools create -t $(HY_BASE_IMAGE_NAME):$(TAG) $(BASE_IMAGE_NAME):$(TAG) 2>/dev/null || true
 	-@docker buildx imagetools create -t $(HY_BASE_IMAGE_NAME):latest $(BASE_IMAGE_NAME):latest 2>/dev/null || true
@@ -63,6 +75,11 @@ build-contract:
 		DOCKER_BUILDKIT=1 docker build -t $(CONTRACT_IMAGE_NAME):$(TAG) -f contract/Dockerfile ../costscope \
 			--build-arg BASE_IMAGE=$(HY_BASE_IMAGE_NAME):$(TAG); \
 	else \
+		if echo "$(PLATFORM)" | grep -q ','; then \
+		  echo "Error: --load does not support multiple platforms for build-contract: $(PLATFORM)" >&2; \
+		  echo "Hint: use 'make push-contract' for multi-arch or set PLATFORM=linux/amd64 (or linux/arm64)." >&2; \
+		  exit 1; \
+		fi; \
 		docker buildx build --platform $(PLATFORM) -t $(CONTRACT_IMAGE_NAME):$(TAG) -f contract/Dockerfile ../costscope --load \
 			--build-arg BASE_IMAGE=$(BASE_IMAGE_NAME):$(TAG); \
 	fi
@@ -70,10 +87,10 @@ build-contract:
 .PHONY: push-contract
 push-contract:
 	# Build from project repository root to include go.mod files; set context to ../costscope
-	docker buildx build --platform $(PLATFORM) -t $(CONTRACT_IMAGE_NAME):$(TAG) -f contract/Dockerfile ../costscope --push \
+	docker buildx build --platform $(MULTI_PLATFORMS) -t $(CONTRACT_IMAGE_NAME):$(TAG) -f contract/Dockerfile ../costscope --push \
 		--build-arg BASE_IMAGE=$(BASE_IMAGE_NAME):$(TAG)
 	# also update moving tag latest
-	docker buildx build --platform $(PLATFORM) -t $(CONTRACT_IMAGE_NAME):latest -f contract/Dockerfile ../costscope --push \
+	docker buildx build --platform $(MULTI_PLATFORMS) -t $(CONTRACT_IMAGE_NAME):latest -f contract/Dockerfile ../costscope --push \
 		--build-arg BASE_IMAGE=$(BASE_IMAGE_NAME):$(TAG)
 
 .PHONY: version
