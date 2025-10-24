@@ -316,6 +316,12 @@ jobs:
         if: env.IS_ACT == 'true'
         run: |
           echo "PLATFORMS=linux/amd64" >> "$GITHUB_ENV"
+      - name: Set up QEMU (multi-arch)
+        if: env.IS_ACT != 'true'
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Buildx (docker-container driver)
+        if: env.IS_ACT != 'true'
+        uses: docker/setup-buildx-action@v3
       - name: Compute tags
         id: meta
         env:
