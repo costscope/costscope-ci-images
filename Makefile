@@ -1,8 +1,7 @@
-IMAGE_NS ?= ghcr.io/costscope/ci
-BASE_IMAGE_NAME ?= $(IMAGE_NS)/base
-CONTRACT_IMAGE_NAME ?= $(IMAGE_NS)/contract
-HY_BASE_IMAGE_NAME ?= $(IMAGE_NS)-base
-HY_CONTRACT_IMAGE_NAME ?= $(IMAGE_NS)-contract
+REGISTRY_NS ?= ghcr.io/costscope
+BASE_IMAGE_NAME ?= $(REGISTRY_NS)/ci-base
+CONTRACT_IMAGE_NAME ?= $(REGISTRY_NS)/ci-contract
+SHELLCHECK_IMAGE_NAME ?= $(REGISTRY_NS)/ci-shellcheck
 DATE_TAG := $(shell date -u +%Y%m%d)
 GIT_SHA := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo dev)
 TAG ?= $(DATE_TAG)-$(GIT_SHA)
@@ -25,6 +24,8 @@ help:
 	@echo "  push         Build & push multi-arch image (and :latest)"
 	@echo "  build-contract  Build warmed contract image (loaded locally)"
 	@echo "  push-contract   Build & push warmed contract image (and :latest)"
+	@echo "  build-shellcheck Build ShellCheck image (loaded locally)"
+	@echo "  push-shellcheck  Build & push ShellCheck image (and :latest)"
 	@echo "  version      Run image and print tool versions"
 	@echo "  sbom-spdx    Generate SPDX SBOM for IMAGE (env IMAGE)"
 	@echo "  sbom-os      Generate OS-only Syft SBOM for IMAGE (env IMAGE)"
@@ -47,10 +48,7 @@ build:
 		$(if $(GITLEAKS_VERSION),--build-arg GITLEAKS_VERSION=$(GITLEAKS_VERSION)) \
 		$(if $(GOSEC_VERSION),--build-arg GOSEC_VERSION=$(GOSEC_VERSION)) \
 		$(if $(GOVULNCHECK_VERSION),--build-arg GOVULNCHECK_VERSION=$(GOVULNCHECK_VERSION))
-	# Tag hyphen-style alias for compatibility with workflows (ci-base) only when image is local
-	-@docker tag $(BASE_IMAGE_NAME):$(TAG) $(HY_BASE_IMAGE_NAME):$(TAG) 2>/dev/null || true
-	# Also tag a hyphen-style alias (ci-base) for local consumption and downstream FROM references
-	-@docker tag $(BASE_IMAGE_NAME):$(TAG) $(subst /,-,$(BASE_IMAGE_NAME)):$(TAG) 2>/dev/null || true
+
 
 .PHONY: push
 push:
@@ -65,23 +63,22 @@ push:
 		$(if $(GOVULNCHECK_VERSION),--build-arg GOVULNCHECK_VERSION=$(GOVULNCHECK_VERSION))
 	# also update moving tag latest
 	docker buildx build --platform $(MULTI_PLATFORMS) -t $(BASE_IMAGE_NAME):latest -f base/Dockerfile base --push
-	# Optionally mirror hyphen-style alias when publishing (best-effort)
-	-@docker buildx imagetools create -t $(HY_BASE_IMAGE_NAME):$(TAG) $(BASE_IMAGE_NAME):$(TAG) 2>/dev/null || true
-	-@docker buildx imagetools create -t $(HY_BASE_IMAGE_NAME):latest $(BASE_IMAGE_NAME):latest 2>/dev/null || true
+
 
 .PHONY: build-contract
 build-contract:
 	@if [ "$(TAG)" = "dev-local" ]; then \
 		DOCKER_BUILDKIT=1 docker build -t $(CONTRACT_IMAGE_NAME):$(TAG) -f contract/Dockerfile ../costscope \
-			--build-arg BASE_IMAGE=$(HY_BASE_IMAGE_NAME):$(TAG); \
+			--build-arg BASE_IMAGE=$(BASE_IMAGE_NAME):$(TAG); \
 	else \
 		if echo "$(PLATFORM)" | grep -q ','; then \
 		  echo "Error: --load does not support multiple platforms for build-contract: $(PLATFORM)" >&2; \
 		  echo "Hint: use 'make push-contract' for multi-arch or set PLATFORM=linux/amd64 (or linux/arm64)." >&2; \
 		  exit 1; \
 		fi; \
-		docker buildx build --platform $(PLATFORM) -t $(CONTRACT_IMAGE_NAME):$(TAG) -f contract/Dockerfile ../costscope --load \
-			--build-arg BASE_IMAGE=$(BASE_IMAGE_NAME):$(TAG); \
+			# For local builds, use classic docker build \
+			DOCKER_BUILDKIT=1 docker build -t $(CONTRACT_IMAGE_NAME):$(TAG) -f contract/Dockerfile ../costscope \
+				--build-arg BASE_IMAGE=$(BASE_IMAGE_NAME):$(TAG); \
 	fi
 
 .PHONY: push-contract
@@ -92,6 +89,29 @@ push-contract:
 	# also update moving tag latest
 	docker buildx build --platform $(MULTI_PLATFORMS) -t $(CONTRACT_IMAGE_NAME):latest -f contract/Dockerfile ../costscope --push \
 		--build-arg BASE_IMAGE=$(BASE_IMAGE_NAME):$(TAG)
+
+
+.PHONY: build-shellcheck
+build-shellcheck:
+	@if echo "$(PLATFORM)" | grep -q ','; then \
+	  echo "Error: --load does not support multiple platforms for build-shellcheck: $(PLATFORM)" >&2; \
+	  echo "Hint: use 'make push-shellcheck' for multi-arch or set PLATFORM=linux/amd64 (or linux/arm64)." >&2; \
+	  exit 1; \
+	fi
+	# Build ShellCheck image from local Dockerfile and load it to the local docker daemon
+	docker buildx build --platform $(PLATFORM) -t $(SHELLCHECK_IMAGE_NAME):$(TAG) -f shellcheck/Dockerfile shellcheck --load \
+		$(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE))
+
+
+.PHONY: push-shellcheck
+push-shellcheck:
+	# Build & push multi-arch ShellCheck image
+	docker buildx build --platform $(MULTI_PLATFORMS) -t $(SHELLCHECK_IMAGE_NAME):$(TAG) -f shellcheck/Dockerfile shellcheck --push \
+		$(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE))
+	# also update moving tag latest
+	docker buildx build --platform $(MULTI_PLATFORMS) -t $(SHELLCHECK_IMAGE_NAME):latest -f shellcheck/Dockerfile shellcheck --push \
+		$(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE))
+
 
 .PHONY: version
 version:

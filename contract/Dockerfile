@@ -10,15 +10,14 @@ WORKDIR /tmp/app
 
 # Root module (primary)
 COPY go.mod go.sum ./
+RUN mkdir -p /root/go/pkg/mod /root/.cache/go-build
 RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/root/go/pkg/mod \
     GOMODCACHE=/root/go/pkg/mod go mod download -modcacherw -x >/dev/null 2>&1 || true
 
 # Optionally warm nested tool module if present (silently skip when absent)
 # Mount the entire context read-only and conditionally run if the nested path exists.
 RUN --mount=type=bind,source=.,target=/src,ro \
     --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/root/go/pkg/mod \
     bash -lc 'if [ -f /src/scripts/tools/funcdups/go.mod ]; then cd /src/scripts/tools/funcdups && GOMODCACHE=/root/go/pkg/mod go mod download -modcacherw -x >/dev/null 2>&1 || true; else echo "skip: no nested funcdups module"; fi'
 
 # Final image includes warmed caches on top of the base toolchain
@@ -29,7 +28,7 @@ LABEL org.opencontainers.image.title="CostScope CI (contract-warmed)" \
 # Ensure destinations exist then copy warmed caches
 RUN mkdir -p /root/go/pkg/mod /root/.cache/go-build
 COPY --from=warm /root/go/pkg/mod /root/go/pkg/mod
-COPY --from=warm /root/.cache/go-build /root/.cache/go-build
+
 
 WORKDIR /work
 CMD ["bash", "-lc", "echo Warmed Go caches present; go version && ls -ld /root/go/pkg/mod /root/.cache/go-build || true"]

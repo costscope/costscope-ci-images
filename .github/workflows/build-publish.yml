@@ -27,6 +27,7 @@ on:
     - cron: "0 3 * * 1"
   push:
     branches:
+      # Temporary: run on push; will migrate some to tags later
       - main
     tags:
       - "v*"
@@ -59,8 +60,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  noop-on-push:
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Noop on push
+        run: |
+          echo '### ci-images build-publish (noop on push)' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Image builds and publishing run on schedule, tags, or manual dispatch.' >> "$GITHUB_STEP_SUMMARY"
   build-base:
     needs: [lint-sh]
+    if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
@@ -282,6 +292,7 @@ jobs:
         run: echo "ci-base@${{ steps.base.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
 
   lint-sh:
+    # Run lint on all events, including push (lightweight and fast)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955

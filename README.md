@@ -68,7 +68,7 @@ Keep pins aligned with `security.yml` env. Update both places together. Consider
 
 ## Local helpers
 
-- `make sbom-spdx` — generate SPDX SBOM (env IMAGE defaults to `$(IMAGE_NS)/base:latest`).
+- `make sbom-spdx` — generate SPDX SBOM (env IMAGE defaults to `ghcr.io/costscope/ci-base:latest`).
 - `make sbom-os` — generate OS-only Syft SBOM.
 - `make sbom-bundle` — produce both SBOMs and, if grype is installed, `grype-report.json`, packed into `sbom-bundle.tgz`.
 - `make lint-sh` — run shellcheck over project scripts.
